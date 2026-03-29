@@ -1,104 +1,196 @@
-Overview
-======== 
-This directory contain tests to verify the example user project 16 bit counter and 2 other simple tests as examples. 
+<table>
+  <tr>
+    <td align="center"><img src="img/bm-lab-logo-white.jpg" alt="BM LABS Logo" width="200"/></td>
+    <td align="center"><img src="img/chip_foundry_logo.png" alt="Chipfoundry Logo" width="200"/></td>
+    <td align="center"><img src="img/EDA_logo_Darkblue.png" alt="EDABK Logo" width="110"/></td>
+  </tr>
+</table>
 
-directory hierarchy
-=====================
+# EDABK_SNN_CIM
 
-# counter_tests 
- 
-contain tests for 16 bit counter for more info refer to [counter_tests](counter_tests/README.md)
- 
- # hello_world 
- 
- Example test with empty firmware that only power and reset caravel the print "Hello World" 
- 
- # hello_world_uart 
- 
- Example test That uses the firmware to send "Hello World" using UART TX 
- 
-# cocotb_tests.py 
+> This project, submitted to **The NVM Innovation Contest**, introduces a Neurosynaptic Core for hand gesture recognition. The design is based on a hybrid Artificial and Spiking Neural Network architecture and integrates the ReRAM-based NVM IP from BM Labs with the ChipFoundry Caravel SoC Platform.
 
-Module that should import all the tests used to be seen for cocotb as a test
+## Contributors
 
-# Experimental ReRAM SNN models
+All members are affiliated to EDABK Laboratory, School of Electrical and Electronic Engineering, Hanoi University of Science and Technology (HUST).
 
-This repository also includes an **experimental** ReRAM-based SNN flow for users who want to evaluate analog-style 1T1R neuron and crossbar behavior alongside the existing digital examples. These files are intended for development and evaluation use, and should be treated as behavioral models rather than final silicon-accurate signoff models.
+| No. | Name                                                         | Study programme                           | Relevant link |
+| --- | ------------------------------------------------------------ | ----------------------------------------- | ------------- |
+| 1   | [Phuong-Linh Nguyen](mailto:linh.nguyenphuong1@sis.hust.edu.vn) | Master of Engineer in IC Design           |               |
+| 2   | [Anh-Dung Hoang](mailto:dung.ha240324e@sis.hust.edu.vn)         | Master of Engineer in IC Design           |               |
+| 3   | [Ngoc-Duong Nguyen](mailto:duong.nn242535m@sis.hust.edu.vn)     | Master of Science in IC Design            |               |
+| 4   | [Hoang-Son Nguyen](mailto:son.nh210741@sis.hust.edu.vn)         | Bachelor in Electronics Engineering       |               |
+| 5   | [Viet-Tung Pham](mailto:tung.pv224415@sis.hust.edu.vn)          | Senior student in Electronics Engineering |               |
+| 6   | [Thanh-Hang Vu](mailto:hang.vt233385@sis.hust.edu.vn)           | Junior student in Electronics Engineering |               |
 
-## What is included
+## Abstract
 
-- `analog_snn/reram_snn_32x32.py`  
-  Base Python model for a 32x32 ReRAM SNN crossbar.
+The application of hand gesture recognition can be extended to advanced human-machine interaction, enabling touchless control in various domains (e.g., automotive, healthcare). However, deploying such Artificial Intelligence (AI) models on edge devices is often hindered by the latency and power consumption arising from the von Neumann bottleneck, where data must be constantly shuttled between memory and processing units.
 
-- `analog_snn/reram_snn_32x32_1t1r.py`  
-  Experimental 1T1R Python model for running spike-based inference with programmable weights.
+From an algorithmic standpoint, Spiking Neural Networks (SNNs) offer a promising solution. Inspired by how the biological brain communicates using discrete neural spikes, SNNs can reduce the quantity and complexity of computations. To compensate for the potential accuracy degradation in pure SNNs, a hybrid approach combining them with Artificial Neural Networks (ANNs) is employed. This allows high-precision input features to be processed, leading to significant accuracy improvements over traditional SNNs.
 
-- `analog_snn/demo_reram_snn_32x32_1t1r.py`  
-  Example script showing how to instantiate the model, load weights, generate a spike train, and run inference.
+On the hardware side, implementing large models presents challenges, especially concerning the storage of trainable parameters (e.g., weights, synaptic connections) which would otherwise need to be reloaded into SRAM or flip-flops before each classification. The use of Non-Volatile ReRAM addresses this by preserving the parameters even when the embedded device enters a deep-sleep state. Furthermore, the provided Neuromorphic X1 IP promises in-memory computing capabilities, which minimize the energy and time required for accumulation operations.
 
-- `verilog/rtl/neuron_core/hdl/reram_1t1r_snn_neuron.v`  
-  Behavioral RTL model of a ReRAM SNN neuron.
+Therefore, our team proposes **EDABK_SNN_CIM**, a solution integrating the ReRAM-based NVM IP from BM Labs and the ChipFoundry Caravel SoC Platform. The overall architecture is described in the [System Block Diagram](#system-block-diagram) section.
 
-- `verilog/rtl/neuron_core/hdl/reram_1t1r_snn_array_32x32.v`  
-  Behavioral RTL model of a 32x32 ReRAM 1T1R SNN array.
+## System Block Diagram
 
-- `verilog/dv/cocotb/reram_1t1r/test_reram_1t1r.py`  
-  Cocotb testbench for basic verification of the experimental RTL.
+![Neuron Core Diagram](img/README_block_diagram.png)
+The proposed system accepts 13 features as input, corresponding to position, orientation, acceleration, and angular velocity, which are captured by Inertial Measurement Unit (IMU) sensors during human hand movements. Based on this data, the system predicts which gesture class the motion belongs to.
 
-## How to use the Python model
+A hardware/software co-design approach is planned for the system implementation. The hardware component, responsible for the primary Neural Network computations, is a Caravel SoC integrated with BM Labs’ NVM IP. The software component, which can run on a host PC or an embedded device, is tasked with encoding sensor data, inferring the final gesture label, and controlling the hardware's operation.
 
-Run the demo script:
+Within the hardware's `user_project_wrapper`, a Controller utilizing a Wishbone Interface manages overall data exchange. The encoded sensor data is first pushed into a Stimuli-in Buffer before being processed by the ReRAM Crossbar array within the BM Labs’ NVM IP. An Address Decoder determines the specific IP commands, thereby selecting the appropriate rows and columns of the array to be accessed. The computational results are then stored in a Spike-out Buffer before being returned to the software component.
+
+## Timeline
+
+- Week 1 (October 13-19):
+
+  + Research and select an optimal Neural Network model for gesture recognition.
+  + Architectural design the Neural Accelerator.
+- Week 2 (October 20-26):
+
+  + Develop RTL code and perform functional verification for the modules within the Neural Accelerator.
+  + Integrate the custom modules with the provided IP and the Caravel Template.
+- Week 3 (October 27 - November 2):
+
+  + Conduct system-level simulation and verification, including timing constraints.
+  + Resolve any DRC and LVS violations that arise from the tool flow.
+
+## Role of the ReRAM IP in In-Memory Computing (IMC)
+
+The Neuromorphic X1 ReRAM IP from BM Labs is used in this project not only as a storage element, but as the **core hardware that enables In-Memory Computing (IMC)**. Each cell in the ReRAM crossbar stores a synaptic weight.
+
+The digital RTL we designed:
+
+- Sends READ or PROGRAM commands to the ReRAM IP (`nvm_synapse_matrix.v`),
+- Receives the resulting binary synapse outputs (i.e., whether current exceeds a threshold),
+- Passes these into the digital neuron array (`nvm_neuron_block.v`), where final accumulation and spike generation occur.
+
+## RTL Implementation Overview
+
+The digital hardware of the system is implemented entirely inside the [`SNN_gesture/`](https://github.com/<username>/EDABK_SNN_CIM/tree/main/verilog/rtl/SNN_gesture) directory.
+The design follows a modular structure and is fully synthesizable on the Caravel SoC.
+
+| Module                       | Function                                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nvm_core_decoder.v`       | Decodes address ranges (`wbs_adr_i[15:12]`) and routes Wishbone signals to either Synapse Matrix, Spike Memory, or Picture-Done handler.                        |
+| `nvm_synapse_matrix.v`     | Instantiates 16 Neuromorphic_X1 ReRAM macros. Broadcasts commands (PROGRAM/READ) to all macros and concatenates their 1-bit outputs into a 16-bit synapse vector. |
+| `nvm_neuron_block.v`       | Digital neuron array, each neuron integrates signed input (stimulus) if synapse=1. Fires (spike=1) if potential ≥ 0. Resets on `picture_done`.                 |
+| `nvm_neuron_spike_out.v`   | Stores 64 output spikes into 4×16-bit registers. Accessible via Wishbone at address `0x3000_1000`.                                                             |
+| `nvm_neuron_core_256x64.v` | Top-level module combining all blocks, interfaces to Wishbone bus, controls data flow between software, ReRAM synapses, neurons, and spike output memory.         |
+
+## RTL Operation Description
+
+The RTL operates in four main stages:
+
+### **1. Command from Firmware**
+
+- Firmware writes a 32-bit word via Wishbone.
+- The address determines whether the command is:
+  - Synapse READ / PROGRAM
+  - Spike output read
+  - Picture-done/reset
+- `nvm_core_decoder.v` activates the correct internal block.
+
+### **2. In-Memory Synapse Access (IMC Stage)**
+
+- `nvm_synapse_matrix.v` forwards the command to the ReRAM synapse IP.
+- For READ:
+  - The ReRAM array performs **in-memory synaptic multiplication**.
+  - Each ReRAM column returns a **1-bit output**, forming `connection[15:0]`.
+- For PROGRAM:
+  - The selected synapse weight (conductance state) is updated.
+
+### **3. Neuron Accumulation and Spike Generation**
+
+- `nvm_neuron_block.v` takes:
+  - The 16-bit `connection` vector from the synapse matrix.
+  - A signed input `stimulus` from the Wishbone data.
+- Each neuron integrates the value if connection is active:
+  ```verilog
+  if (enable && connection[i])
+      potential[i] <= potential[i] + stimulus;
+  spike_o[i] = (potential[i] >= 0);
+
+  ```
+- If the membrane potential reaches or exceeds zero → a spike (1) is generated.
+- If picture_done is asserted, all neuron potentials are cleared for the next frame.
+
+### **Step 4: Spike Output and Readback**
+
+Once all input features for a gesture frame have been processed, the neuron block produces a 64-bit spike vector (`spike_o`). This value is transferred into the `nvm_neuron_spike_out.v` module, where it is stored in four 16-bit registers.
+
+| Wishbone Address | Data Returned             |
+| ---------------- | ------------------------- |
+| `0x3000_1000`  | Spikes for neurons 0–15  |
+| `0x3000_1002`  | Spikes for neurons 16–31 |
+| `0x3000_1004`  | Spikes for neurons 32–47 |
+| `0x3000_1006`  | Spikes for neurons 48–63 |
+
+To finalize one classification event, the firmware writes to the **picture-done address** `0x3000_2000`. This triggers three actions in hardware:
+
+1. **Spike latch** → Current 64-bit spike results are saved.
+2. **Neuron reset** → All membrane potentials (`potential[i]`) are cleared.
+3. **Ready for next frame** → The system waits for new synaptic inputs.
+
+After this point, the firmware can read spikes via Wishbone and interpret them as the output class of the gesture.
+
+## Replicating Locally
+
+### Follow these steps to set up your environment and harden the design:
+
+1. **Clone the Repository:**
 
 ```bash
-python analog_snn/demo_reram_snn_32x32_1t1r.py
+git clone https://github.com/schizoneko/EDABK_SNN_CIM.git
 ```
 
-For custom experiments, use `demo_reram_snn_32x32_1t1r.py` as the reference entry point. The normal flow is:
-
-1. create the ReRAM SNN model,
-2. program or load the weight matrix,
-3. generate or load an input spike train,
-4. run inference,
-5. inspect the output spike tensor.
-
-## How to use the RTL + Cocotb flow
-
-Go to the verification directory:
+2. **Prepare Your Environment:**
 
 ```bash
-cd verilog/dv/cocotb/reram_1t1r
+cd EDABK_SNN_CIM
+make setup
 ```
 
-Run the cocotb test with Icarus Verilog:
+3. **Install IPM:**
 
 ```bash
-make SIM=icarus
+pip install cf-ipm
 ```
 
-If you use another simulator, update the `SIM` variable in the same command or in the local Makefile.
+4. **Install the Neuromorphic X1 IP:**
 
-## Notes for users
+```bash
+ipm install Neuromorphic_X1_32x32
+```
 
-- This flow is experimental and intended to help users evaluate ReRAM-based SNN concepts inside this repository.
-- The Python and RTL models are behavioral and are useful for architecture exploration, dataflow experiments, and early verification.
-- Users should validate timing, analog non-idealities, and foundry-specific implementation details separately before relying on this flow for tapeout decisions.
+5. **Edit Behavioral Model Name in IP:**
 
- 
-Run tests 
-===========
-# run hello_world_uart
-    ```bash
-    caravel_cocotb -t hello_world_uart -tag hello_world 
-    ```
-# run all counter testlist
-    ```bash
-    caravel_cocotb -tl counter_tests/counter_tests.yaml -tag counter_tests 
-    ```
-# run from different directory
-    ```bash
-    caravel_cocotb -t hello_world_uart -tag hello_world -design_info <path to design_info.yaml>
-    ```      
-# run with changing the results directory
-    ```bash
-    caravel_cocotb -t hello_world_uart -tag hello_world -sim  <path to results directory>
-    ```  
+The cocotb simulation flow uses `verilog/includes/includes.rtl.caravel_user_project` as its source files, which includes a path to the Neuromorphic IP behavioral model. In order to avoid making a second `user_project_wrapper.v`, it is simpler to modify the behavioral model module name from `Neuromorphic_X1` to `Neuromorphic_X1_wb` to align with the stub that is used when actually hardening. With this change, the same `user_project_wrapper.v` works for both (cocotb) testbenching as well as hardening.
+
+In other words, rename line 16...
+```
+File: ip/Neuromorphic_X1_32x32/hdl/beh_model/Neuromorphic_X1_Beh.v
+16: module Neuromorphic_X1_wb (
+```
+
+6. **Harden the Neuron Core:**
+
+```bash
+make neuron_core
+```
+7. **Harden the Design:**
+
+```bash
+make SNN_gesture
+```
+
+## Documentation
+
+- Details about the Neuromorphic X1 IP: [Neuromorphic X1 documentation](https://github.com/BMsemi/Neuromorphic_X1_32x32)
+- Competition details: [ChipFoundry BM Labs Challenge](https://chipfoundry.io/challenges/bmlabs)
+
+## License
+
+This project is licensed under Apache 2.0 - see LICENSE file for details.
