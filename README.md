@@ -136,6 +136,32 @@ To finalize one classification event, the firmware writes to the **picture-done 
 
 After this point, the firmware can read spikes via Wishbone and interpret them as the output class of the gesture.
 
+## ReRAM SNN Changes and How to Use It
+
+This repository can also support a **ReRAM-based SNN flow using 1T1R-style neuron/synapse behavior** as an alternative to the original fully digital neuron accumulation path. In this mode, the neuron behavior is represented with programmable ReRAM conductance states and spike-driven accumulation, so the SNN computation more closely matches an in-memory-computing implementation.
+
+### What changes in this ReRAM SNN flow
+
+- The neuron/synapse behavior is modeled as **ReRAM-based 1T1R cells** instead of purely digital synapse handling.
+- Signed weights are represented using **differential conductance mapping** (positive and negative branches).
+- Spike processing is performed as **current-style accumulation followed by neuron thresholding**, which better reflects a ReRAM CIM implementation.
+- A **cocotb-based verification flow** can be used to validate programming, spike propagation, membrane updates, and output spike generation against a Python reference model.
+
+### How to use it
+
+1. Add the ReRAM 1T1R SNN RTL files into the neuron core RTL path.
+2. Use the cocotb testbench to program weights, apply spike inputs, and verify output spikes and membrane behavior.
+3. Use the Python behavioral model as a reference when checking the RTL response.
+4. Keep the existing digital flow if needed, and treat the ReRAM SNN path as an additional verification and implementation option.
+
+### Recommended workflow
+
+- Program the ReRAM SNN weights first.
+- Apply spike vectors frame-by-frame or timestep-by-timestep.
+- Read back spike outputs and neuron states.
+- Compare RTL outputs with the Python behavioral reference model during verification.
+
+
 ## Replicating Locally
 
 ### Follow these steps to set up your environment and harden the design:
