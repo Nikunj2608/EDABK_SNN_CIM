@@ -14,9 +14,32 @@ from cocotb.triggers import RisingEdge, FallingEdge, ClockCycles, Join
 from nvm_parameter import *
 from read_file import *
 
+async def load_and_inject_stimuli(dut, file_path):
+    # 1. Read the text file we generated
+    with open(file_path, "r") as f:
+        # Filter out comments and whitespace
+        spike_data = [line.strip() for line in f if line.strip() and not line.startswith("//")]
+
+    dut._log.info(f"Loaded {len(spike_data)} rows of spikes from {file_path}")
+
+    # 2. Feed it into the SNN row-by-row
+    # Assuming your SNN is mapped to the 'mprj' pins or internal wires
+    for i, binary_row in enumerate(spike_data):
+        # Convert "0010..." to integer
+        spike_val = int(binary_row, 2)
+        
+        # Drive the value into your user project
+        # Update 'uut.chip_core.mprj' to match your actual SNN input port name
+        dut.uut.chip_core.mprj.user_project.input_spikes.value = spike_val
+        
+        # Wait for 1 clock cycle (or match your Ramp modulation timing)
+        await ClockCycles(dut.clk, 1)
+        
+        if i % 32 == 0:
+            dut._log.info(f"Processing Frame {i//32}...")
 
 BASE_DIR = "./mem/connection"
-INPUT_FILE = "./mem/stimuli/stimuli.txt"
+INPUT_FILE = "stimuli_class2.txt"
 # --- Helper Functions for Wishbone and NVM Access ---
 
 # Wishbone Write: Used to send control or configuration data to the DUT.
@@ -209,10 +232,6 @@ def load_connection_matrices(base_path):
     return connection_matrices
 
 async def program_layer_connections(dut, core_idx, layer_conn, NUM_NEURON_LAYER):
-    """
-    Programs the connection weights for a single core in a layer.
-    **INJECTS REAL-WORLD RRAM PHYSICS DECAY BEFORE WRITING**
-    """
     for row_i in range(32):
         for col_i in range(32):
             row = row_i
@@ -227,27 +246,9 @@ async def program_layer_connections(dut, core_idx, layer_conn, NUM_NEURON_LAYER)
             # Get the ideal, perfect bits from the text file
             val_slice = layer_conn[axon][NUM_NEURON_LAYER - (neuron + 16):NUM_NEURON_LAYER - neuron] 
             
-            # --- APPLY RRAM DECAY PHYSICS ---
-            simulation_age_s = 5000.0 # Age the chip by 5,000 seconds
-            read_threshold = 1.1      # Normalized conductance threshold to read a '1'
-            
-            degraded_slice = []
-            for ideal_bit in val_slice:
-                if ideal_bit == 1:
-                    # Calculate exactly how much the memory has leaked over 5,000 seconds
-                    g_final = conductance_at_age(age_s=simulation_age_s, state="LRS", modulation="ramp")
-                    
-                    # Does the decayed conductance still cross the read threshold?
-                    if g_final >= read_threshold:
-                        degraded_slice.append(1)
-                    else:
-                        degraded_slice.append(0) # BIT FLIP ERROR! The memory leaked too much.
-                else:
-                    degraded_slice.append(0) # HRS stays 0
-            
-            # Convert the degraded array back into a number for the Wishbone bus
+            # --- PURE HARDWARE CONTROL TEST ---
+            degraded_slice = val_slice 
             int_val = list_to_binary(degraded_slice)
-            # --------------------------------
             
             data_to_write = (
                 (MODE_PROGRAM << 30) |  
@@ -289,9 +290,11 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
                 
                 # Input stimuli (spike_in) depends on the layer:
                 if layer == 0:
-                    # Layer 0: Input comes from the stimuli file
-                    stimuli_val = stimuli[axon // 2]  # Axons are grouped into pairs (32-bit stimuli value)
-                    full_stimuli_val = list_to_binary(stimuli_val)
+                    # Layer 0: The stimuli is read directly from our text file
+                    # We need to take the 32-bit row and split it into two 16-bit blocks
+                    # based on whether it is an even or odd axon group.
+                    
+                    full_stimuli_val = stimuli[pic][row] 
                     
                     if (axon % 2) == 0:
                         # Even axon: Take the upper 16 bits [31:16]
@@ -300,24 +303,7 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
                         # Odd axon: Take the lower 16 bits [15:0]
                         val_slice = full_stimuli_val & 0xFFFF
                         
-                    # For Layer 0, the 'spike_active' condition is implicitly handled by the input value `val_slice` 
-                    # being written into the `data_for_read_op` field. The Verilog module likely uses this value directly.
-                    spike_active = True # Always 'active' since we're providing the stimulus slice
-                    
-                else:
-                    # Layers 1 and 2: Input comes from the previous layer's spike output
-                    input_index = axon # Local axon index
-                    if layer == 1:
-                        # Layer 1's input comes from the global L0 output matrix, indexed by (core * NUM_AXON_LAYER_1 + axon)
-                        global_input_index = core_idx * layer_axon_limit + input_index
-                        spike_active = (spike_in_matrix[pic][global_input_index] == 1)
-                    elif layer == 2:
-                        # Layer 2's input comes from the global L1 output matrix, indexed by (axon)
-                        spike_active = (spike_in_matrix[pic][input_index] == 1)
-                    
-                    # For L1/L2, the actual data written is just '1' if a spike occurred, 
-                    # signifying an active input for the read operation.
-                    val_slice = 1 if spike_active else 0
+                    spike_active = True # We always trigger the read for L0 to inject the block
                 
                 
                 if spike_active:
@@ -361,7 +347,20 @@ async def neuron_network_test(dut):
     connection_matrices = load_connection_matrices(base_dir)
     
     # Load stimuli and correct output files
-    stimuli = read_matrix_from_file(INPUT_FILE)
+    # Load stimuli properly into [pic][row] array of 32-bit integers
+    stimuli = []
+    with open(INPUT_FILE, "r") as f:
+        # Get all binary string lines, ignoring comments
+        lines = [line.strip() for line in f if line.strip() and not line.startswith("//")]
+        
+        # We have 10 frames (pics), each with 32 rows
+        for pic in range(10): 
+            frame_data = []
+            for row in range(32):
+                # Convert the 32-bit binary string directly to an integer
+                row_int = int(lines[pic * 32 + row], 2)
+                frame_data.append(row_int)
+            stimuli.append(frame_data)
     
     # Initialize spike output matrices for each layer
     spike_out_layer_0 = [[0 for _ in range(NUM_CORES_LAYER_0 * NUM_NEURON)] for __ in range(SUM_OF_PICS)]
