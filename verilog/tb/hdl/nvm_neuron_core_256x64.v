@@ -115,7 +115,8 @@ module nvm_neuron_core_256x64 (
     .stimuli    (stimuli),
     .connection (connection),
     .picture_done(picture_done),
-    .enable     (slave_ack_o[0]),
+    // NEW: Force enable whenever a read is directed at the matrix
+    .enable     (wbs_stb_i & synapse_matrix_select & ~wbs_we_i), 
     .spike_o    (spike_o)
   );
 
