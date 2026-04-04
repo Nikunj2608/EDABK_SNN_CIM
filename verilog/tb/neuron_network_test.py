@@ -244,21 +244,30 @@ async def program_layer_connections(dut, core_idx, layer_conn, NUM_NEURON_LAYER)
             neuron = neuron_index_group * 16 
             
             # Get the ideal, perfect bits from the text file
+            # Get the ideal, perfect bits from the text file
             val_slice = layer_conn[axon][NUM_NEURON_LAYER - (neuron + 16):NUM_NEURON_LAYER - neuron] 
             
-            # --- PURE HARDWARE CONTROL TEST ---
-            degraded_slice = val_slice 
-            int_val = list_to_binary(degraded_slice)
+            # --- RRAM PHYSICS DEGRADATION ---
+            # We assume an age of 1500 seconds (inside the relaxation window)
+            # and that we programmed using 'ramp' modulation.
+            SIMULATED_AGE_S = 1500.0 
             
-            data_to_write = (
-                (MODE_PROGRAM << 30) |  
-                (row            << 25) |  
-                (col            << 20) |  
-                (0              << 16) |  
-                (int_val)                 
-            )
+            degraded_slice = []
+            for bit in val_slice:
+                if bit == 1:
+                    # Calculate true LRS (Low Resistance State) conductance
+                    g_val = conductance_at_age(SIMULATED_AGE_S, state="LRS", modulation="ramp")
+                    # If conductance drops too low, the digital bit flips to 0
+                    degraded_bit = 1 if g_val > 1.5 else 0 
+                else:
+                    # Calculate true HRS (High Resistance State) conductance
+                    g_val = conductance_at_age(SIMULATED_AGE_S, state="HRS", modulation="ramp")
+                    degraded_bit = 0 # HRS stays 0 digitally
+                    
+                degraded_slice.append(degraded_bit)
 
-            await nvm_write(dut, 0x30000000, data_to_write)
+            # Convert the physically-degraded bits to an integer for the Verilog chip
+            int_val = list_to_binary(degraded_slice)
             
 async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matrix, spike_out_matrix, stimuli=None, layer_axon_limit=None):
     """
