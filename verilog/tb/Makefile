@@ -14,7 +14,7 @@ ifeq ($(TOPLEVEL_LANG),verilog)
     				  $(COCOTB)/hdl/nvm_neuron_block.v \
     				  $(COCOTB)/hdl/nvm_synapse_matrix.v \
     				  $(COCOTB)/hdl/nvm_neuron_spike_out.v \
-    				  $(COCOTB)/hdl/Neuromorphic_X1_Beh.v
+    				  $(PWD)/../rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v
 
     ifneq ($(filter $(SIM),riviera activehdl),)
         COMPILE_ARGS += -sv2k12

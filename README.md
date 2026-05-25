@@ -29,7 +29,7 @@ The application of hand gesture recognition can be extended to advanced human-ma
 
 From an algorithmic standpoint, Spiking Neural Networks (SNNs) offer a promising solution. Inspired by how the biological brain communicates using discrete neural spikes, SNNs can reduce the quantity and complexity of computations. To compensate for the potential accuracy degradation in pure SNNs, a hybrid approach combining them with Artificial Neural Networks (ANNs) is employed. This allows high-precision input features to be processed, leading to significant accuracy improvements over traditional SNNs.
 
-On the hardware side, implementing large models presents challenges, especially concerning the storage of trainable parameters (e.g., weights, synaptic connections) which would otherwise need to be reloaded into SRAM or flip-flops before each classification. The use of Non-Volatile ReRAM addresses this by preserving the parameters even when the embedded device enters a deep-sleep state. Furthermore, the provided Neuromorphic X1 IP promises in-memory computing capabilities, which minimize the energy and time required for accumulation operations.
+On the hardware side, implementing large models presents challenges, especially concerning the storage of trainable parameters (e.g., weights, synaptic connections) which would otherwise need to be reloaded into SRAM or flip-flops before each classification. The use of Non-Volatile ReRAM addresses this by preserving the parameters even when the embedded device enters a deep-sleep state. The current RTL simulation path uses the Neuromorphic X2 behavioral model, which adds READ, PROGRAM, and COMPUTE-mode support around the ReRAM-style 32x32 array.
 
 Therefore, our team proposes **EDABK_SNN_CIM**, a solution integrating the ReRAM-based NVM IP from BM Labs and the ChipFoundry Caravel SoC Platform. The overall architecture is described in the [System Block Diagram](#system-block-diagram) section.
 
@@ -59,11 +59,11 @@ Within the hardware's `user_project_wrapper`, a Controller utilizing a Wishbone 
 
 ## Role of the ReRAM IP in In-Memory Computing (IMC)
 
-The Neuromorphic X1 ReRAM IP from BM Labs is used in this project not only as a storage element, but as the **core hardware that enables In-Memory Computing (IMC)**. Each cell in the ReRAM crossbar stores a synaptic weight.
+The Neuromorphic X2 ReRAM behavioral model from BM Labs is used in this project not only as a storage element, but as the **core hardware model that enables In-Memory Computing (IMC)** during RTL verification. Each cell in the ReRAM crossbar stores a binary synaptic state.
 
 The digital RTL we designed:
 
-- Sends READ or PROGRAM commands to the ReRAM IP (`nvm_synapse_matrix.v`),
+- Sends READ, PROGRAM, and X2 COMPUTE-mode commands to the ReRAM IP model (`nvm_synapse_matrix.v`),
 - Receives the resulting binary synapse outputs (i.e., whether current exceeds a threshold),
 - Passes these into the digital neuron array (`nvm_neuron_block.v`), where final accumulation and spike generation occur.
 
@@ -75,7 +75,7 @@ The design follows a modular structure and is fully synthesizable on the Caravel
 | Module                       | Function                                                                                                                                                          |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `nvm_core_decoder.v`       | Decodes address ranges (`wbs_adr_i[15:12]`) and routes Wishbone signals to either Synapse Matrix, Spike Memory, or Picture-Done handler.                        |
-| `nvm_synapse_matrix.v`     | Instantiates 16 Neuromorphic_X1 ReRAM macros. Broadcasts commands (PROGRAM/READ) to all macros and concatenates their 1-bit outputs into a 16-bit synapse vector. |
+| `nvm_synapse_matrix.v`     | Instantiates Neuromorphic_X2 behavioral ReRAM macros. Broadcasts commands (PROGRAM/READ/COMPUTE) and concatenates 1-bit read outputs into a synapse vector. |
 | `nvm_neuron_block.v`       | Digital LIF neuron array. Performs spatial accumulation during `enable`, then evaluates threshold, spike generation, membrane reset, and leak on `picture_done`. |
 | `nvm_neuron_spike_out.v`   | Stores 64 output spikes into 4×16-bit registers. Accessible via Wishbone at address `0x3000_1000`.                                                             |
 | `nvm_neuron_core_256x64.v` | Top-level module combining all blocks, interfaces to Wishbone bus, controls data flow between software, ReRAM synapses, neurons, and spike output memory.         |
@@ -97,6 +97,9 @@ This architecture addresses that challenge by integrating **In-Memory Computing 
 3. **ReRAM Conductance Degradation Modeling:**
    The digital verification flow integrates Python-based analog ReRAM physics models to emulate hardware aging and LRS/HRS drift over time.
 
+4. **Neuromorphic X2 Behavioral Model Integration:**
+   The main RTL and testbench integration now use `Neuromorphic_X2_wb` instead of the older X1 behavioral model. The tracked files are `verilog/rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v` for simulation and `verilog/rtl/neuron_core/hdl/NEUROMORPHIC_X2_stub.v` for OpenLane elaboration.
+
 ## RTL Operation (LIF Dynamics)
 
 The RTL runs in a continuous spatial-temporal loop over the Wishbone bus:
@@ -104,7 +107,8 @@ The RTL runs in a continuous spatial-temporal loop over the Wishbone bus:
 ### 1. In-Memory Synapse Access
 
 - `nvm_synapse_matrix.v` performs in-memory synaptic multiplication.
-- Each ReRAM column returns a 1-bit output, forming `connection[15:0]`.
+- In READ mode, each ReRAM column returns a 1-bit output, forming the neuron `connection` mask.
+- In X2 COMPUTE mode, the model can consume a 32-entry input vector and push 16-bit dot-product results into its output FIFO.
 
 ### 2. Spatial Accumulation
 
@@ -246,7 +250,7 @@ The simulation dynamically generates Wishbone transactions, streams stimuli thro
 
 ### Integration note
 
-These additions are **optional** and are meant to extend the repository with a ReRAM-based SNN path. They do not replace the original digital implementation described above unless the user explicitly chooses to integrate them into the main system path.
+The 1T1R additions are **optional** and are meant to extend the repository with a ReRAM-based SNN path. The main wrapper path has separately been updated to use the Neuromorphic X2 behavioral model.
 
 
 ## Replicating Locally
@@ -272,36 +276,37 @@ make setup
 pip install cf-ipm
 ```
 
-4. **Install the Neuromorphic X1 IP:**
+4. **Use the tracked Neuromorphic X2 model:**
 
-```bash
-ipm install Neuromorphic_X1_32x32
+The X2 behavioral model and OpenLane stub are now checked into the RTL tree:
+
+```text
+verilog/rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v
+verilog/rtl/neuron_core/hdl/NEUROMORPHIC_X2_stub.v
 ```
 
-5. **Edit Behavioral Model Name in IP:**
+No manual module rename is required. The RTL include file points to `Neuromorphic_X2_Beh.v`, and the OpenLane wrapper config points to `NEUROMORPHIC_X2_stub.v`.
 
-The cocotb simulation flow uses `verilog/includes/includes.rtl.caravel_user_project` as its source files, which includes a path to the Neuromorphic IP behavioral model. In order to avoid making a second `user_project_wrapper.v`, it is simpler to modify the behavioral model module name from `Neuromorphic_X1` to `Neuromorphic_X1_wb` to align with the stub that is used when actually hardening. With this change, the same `user_project_wrapper.v` works for both (cocotb) testbenching as well as hardening.
-
-In other words, rename line 16...
-```
-File: ip/Neuromorphic_X1_32x32/hdl/beh_model/Neuromorphic_X1_Beh.v
-16: module Neuromorphic_X1_wb (
-```
-
-6. **Harden the Neuron Core:**
+5. **Harden the Neuron Core:**
 
 ```bash
 make neuron_core
 ```
-7. **Harden the Design:**
+6. **Harden the Design:**
 
 ```bash
 make SNN_gesture
 ```
 
+### Physical macro note
+
+The repository now has the X2 behavioral model and X2 Verilog stub. Before final PnR/signoff, confirm that matching X2 physical views are available (`.lef`, `.gds`, `.lib`) or that the project intentionally maps the X2 stub to the existing physical macro collateral.
+
 ## Documentation
 
-- Details about the Neuromorphic X1 IP: [Neuromorphic X1 documentation](https://github.com/BMsemi/Neuromorphic_X1_32x32)
+- Neuromorphic X2 behavioral model: `verilog/rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v`
+- Neuromorphic X2 OpenLane stub: `verilog/rtl/neuron_core/hdl/NEUROMORPHIC_X2_stub.v`
+- Original Neuromorphic X1 IP reference: [Neuromorphic X1 documentation](https://github.com/BMsemi/Neuromorphic_X1_32x32)
 - Competition details: [ChipFoundry BM Labs Challenge](https://chipfoundry.io/challenges/bmlabs)
 
 ## License

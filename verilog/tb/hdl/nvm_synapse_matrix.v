@@ -53,7 +53,7 @@ module nvm_synapse_matrix (
     for (i = 0; i < NUM_OF_MACRO; i=i+1) begin
       assign mem[i] = wbs_dat_i[i] ? MEM_HIGH : MEM_LOW;
 
-      Neuromorphic_X1 X1_inst (
+      Neuromorphic_X2_wb X2_inst (
         `ifdef USE_PG_PIN
         .VDDC(VDDC),
         .VDDA(VDDA),

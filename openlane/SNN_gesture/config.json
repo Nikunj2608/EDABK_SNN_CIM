@@ -6,7 +6,7 @@
     ],
     "PNR_SDC_FILE": "dir::signoff.sdc",
     "EXTRA_VERILOG_MODELS": [
-    	"dir::../../ip/Neuromorphic_X1_32x32/hdl/NEUROMORPHIC_X1_stub.v"
+    	"dir::../../verilog/rtl/neuron_core/hdl/NEUROMORPHIC_X2_stub.v"
   ],
 
     "//": "Hardening strategy variables (this is for 1-Macro-First Hardening). Visit https://docs.google.com/document/d/1pf-wbpgjeNEM-1TcvX2OJTkHjqH_C9p-LURCASS0Zo8 for more info",

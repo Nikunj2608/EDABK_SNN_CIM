@@ -93,7 +93,7 @@ module user_project_wrapper #(
   .slave_3_dat_o  (slave_3_dat_o )
 
 );
-  Neuromorphic_X1_wb mprj (
+  Neuromorphic_X2_wb mprj (
     `ifdef USE_POWER_PINS
         .VDDC (vccd1),
         .VDDA (vdda1),
@@ -136,7 +136,7 @@ module user_project_wrapper #(
     // // ------------------------------------------------------------
     // // Instance 1
     // // ------------------------------------------------------------
-    Neuromorphic_X1_wb mprj1 (
+    Neuromorphic_X2_wb mprj1 (
     `ifdef USE_POWER_PINS
         .VDDC (vccd1),
         .VDDA (vdda1),
@@ -180,7 +180,7 @@ module user_project_wrapper #(
 // // ------------------------------------------------------------
     // // Instance 2
     // // ------------------------------------------------------------
-//     Neuromorphic_X1_wb mprj2 (
+//     Neuromorphic_X2_wb mprj2 (
 //     `ifdef USE_POWER_PINS
 //         .VDDC (vccd1),
 //         .VDDA (vdda1),
@@ -224,7 +224,7 @@ module user_project_wrapper #(
 // // // ------------------------------------------------------------
 //     // // Instance 3
 //     // // ------------------------------------------------------------
-//     Neuromorphic_X1_wb mprj3 (
+//     Neuromorphic_X2_wb mprj3 (
 //     `ifdef USE_POWER_PINS
 //         .VDDC (vccd1),
 //         .VDDA (vdda1),
