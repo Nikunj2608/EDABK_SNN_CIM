@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
@@ -13,3 +14,20 @@ TOPLEVEL = nvm_neuron_core_256x64
 MODULE = neuron_network_test
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
+=======
+SIM ?= icarus
+TOPLEVEL_LANG ?= verilog
+
+# 1. Include ALL source files needed for the Core
+# Using a wildcard is the safest way to ensure the decoder and matrix are included
+VERILOG_SOURCES += $(PWD)/hdl/*.v
+VERILOG_SOURCES += $(PWD)/../rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v
+
+# 2. Set the TOPLEVEL to the wrapper, NOT the internal block
+TOPLEVEL = nvm_neuron_core_256x64
+
+# 3. Point to our smoke test module
+MODULE = neuron_network_test
+
+include $(shell cocotb-config --makefiles)/Makefile.sim
+>>>>>>> Stashed changes
