@@ -26,8 +26,21 @@ module nvm_neuron_spike_out (
       sram[3]   <= 16'b0;
     end
     else if (wbs_cyc_i && wbs_stb_i) begin
+        $display(
+        "SPIKE PORT HIT cyc=%b stb=%b we=%b addr=%h",
+        wbs_cyc_i,
+        wbs_stb_i,
+        wbs_we_i,
+        wbs_adr_i
+    );
         wbs_ack_o <= 1'b1;
         if (wbs_we_i) begin
+           $display(
+            "SPIKE SRAM WRITE addr=%0d data=%h",
+            addr,
+            wbs_dat_i[15:0]
+        );
+
           // Byte-specific writes based on wbs_sel_i
           if (wbs_sel_i[0]) sram[addr][7:0] <= wbs_dat_i[7:0];
           if (wbs_sel_i[1]) sram[addr][15:8] <= wbs_dat_i[15:8];

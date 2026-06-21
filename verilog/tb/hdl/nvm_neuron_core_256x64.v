@@ -112,6 +112,18 @@ module nvm_neuron_core_256x64 (
     .Vcc_Body(Vcc_Body)
   );
 
+  always @(posedge wb_clk_i) begin
+    if (slave_ack_o[0]) begin
+        $display(
+            "CORE DBG ack=%b conn=%h stim=%0d time=%0t",
+            slave_ack_o[0],
+            connection,
+            stimuli,
+            $time
+        );
+    end
+end
+
   nvm_neuron_block neuron_block_inst (
     .clk        (wb_clk_i),
     .rst        (wb_rst_i),
@@ -144,6 +156,15 @@ module nvm_neuron_core_256x64 (
                      neuron_spike_out_select ? slave_dat_o[1] :
                      32'b0;
   assign wbs_ack_o = |slave_ack_o;
+
+  always @(posedge wb_clk_i) begin
+    if (picture_done)
+        $display(
+            "PICTURE_DONE spike_o=%h",
+            spike_o
+        );
+end
+
 
 endmodule
 

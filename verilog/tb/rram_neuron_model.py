@@ -220,6 +220,59 @@ def lif_readout(
 
     return t, u, v, np.asarray(spikes, dtype=float)
 
+def calculate_1t1r_syn_sum(spike_array, programmed_weights):
+    """
+    Cycle-accurate differential synaptic sum matching reram_1t1r_snn_neuron.v
+    
+    spike_array: List of input spikes (0 or 1) for the current clock cycle.
+    programmed_weights: List of int8 weights programmed into this neuron's column.
+    """
+    pos_sum = 0
+    neg_sum = 0
+    
+    for idx in range(len(spike_array)):
+        if spike_array[idx] == 1:
+            weight = programmed_weights[idx]
+            
+            # The hardware isolates the 3-bit magnitude into g_pos or g_neg based on sign
+            if weight > 0:
+                g_pos = weight & 0x07  
+                g_neg = 0
+            elif weight < 0:
+                g_pos = 0
+                g_neg = abs(weight) & 0x07
+            else:
+                g_pos = 0
+                g_neg = 0
+                
+            pos_sum += g_pos
+            neg_sum += g_neg
+            
+    # Differential summation exactly as synthesized in the Verilog ALU
+    syn_sum = pos_sum - neg_sum
+    
+    return syn_sum
+
+def calculate_1t1r_discrete_step(v_mem_current, syn_sum, threshold=24, mem_floor=-64):
+    """
+    Cycle-accurate discrete LIF step matching reram_1t1r_snn_neuron.v.
+    Replaces continuous tau_relax mapping.
+    """
+    # 1. Leakage (Arithmetic right shift by 2 matches Verilog >>> 2)
+    leak = v_mem_current >> 2
+    
+    # 2. Integrate synaptic sum and apply leak
+    v_mem_next = v_mem_current - leak + syn_sum
+    
+    # 3. Firing condition and floor clamping
+    spike = 0
+    if v_mem_next >= threshold:
+        spike = 1
+        v_mem_next = 0  # Hard reset to MEM_RESET
+    elif v_mem_next < mem_floor:
+        v_mem_next = mem_floor
+        
+    return v_mem_next, spike
 
 def spike_rate_hz(spikes: np.ndarray, duration_s: float) -> float:
     return float(len(spikes) / duration_s)

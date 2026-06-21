@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 module Neuromorphic_X2_wb (
  
  `ifdef USE_POWER_PINS
@@ -50,7 +49,6 @@ module Neuromorphic_X2_wb (
 );
 
 endmodule
-=======
 module Neuromorphic_X2_wb (
  
  `ifdef USE_POWER_PINS
@@ -102,4 +100,3 @@ module Neuromorphic_X2_wb (
 );
 
 endmodule
->>>>>>> Stashed changes

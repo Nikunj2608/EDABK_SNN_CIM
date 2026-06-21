@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import cocotb
-from rram_neuron_model import conductance_at_age
+from rram_neuron_model import conductance_at_age, calculate_1t1r_syn_sum, calculate_1t1r_discrete_step
 # from cocotb.binary import BinaryRepresentation, BinaryValue
 from cocotb.triggers import Timer
 from cocotb.clock import Clock
@@ -204,7 +204,11 @@ async def wishbone_read(dut, address, spike_o_matrix=None, pic=0, slice_idx=0, l
     # The output spike is expected to be reversed (LSB first) for easier indexing.
     # Assumes dut.wbs_dat_o.value returns a BinaryValue
     output_spike = str(dut.wbs_dat_o.value)[::-1]
-    
+    if layer == 0 and pic == 0:
+        dut._log.info(
+            f"READBACK slice={slice_idx} "
+            f"raw={dut.wbs_dat_o.value}"
+        )
     # If a spike matrix is provided, parse and store the spike outputs
     if spike_o_matrix is not None:
         # NUM_NEURON_PER_SLICE must be the number of bits in output_spike
@@ -213,6 +217,45 @@ async def wishbone_read(dut, address, spike_o_matrix=None, pic=0, slice_idx=0, l
             global_neuron_index = core * NUM_NEURON + slice_idx * NUM_NEURON_PER_SLICE + i
             # Store the spike (0 or 1)
             spike_o_matrix[pic][global_neuron_index] = int(output_spike[i])
+
+async def program_8bit_weight(dut, row_idx, neuron_idx, weight_val):
+    """
+    Translates an int8 weight into the 32-bit Wishbone payload for the 1T1R array.
+    """
+    # 1. Extract Sign and Magnitude from the int8 weight (-128 to 127)
+    # The 1T1R array uses G_BITS=3 for conductance, plus 1 bit for sign.
+    sign_bit = 1 if weight_val < 0 else 0
+    magnitude = abs(weight_val) & 0x07  # Mask to lower 3 bits (0-7)
+    
+    # 2. Pack the 32-bit Wishbone payload based on the Caravel Wrapper mapping:
+    # [31:30] = 2'b11 (Write Mode)
+    # [29:25] = Row/Axon index (0-31)
+    # [23:20] = Neuron index (0-15 within the array)
+    # [7]     = Sign bit (1 = negative, 0 = positive)
+    # [2:0]   = Conductance Level (Magnitude)
+    
+    mode_bits   = 0x3 << 30
+    row_bits    = (row_idx & 0x1F) << 25
+    neuron_bits = (neuron_idx & 0x0F) << 20
+    sign_mapped = (sign_bit & 0x1) << 7
+    mag_mapped  = (magnitude & 0x7)
+    
+    wb_payload = mode_bits | row_bits | neuron_bits | sign_mapped | mag_mapped
+    
+    # 3. Determine target address based on your 64x64 decoder
+    # The core decoder routes 0x3000_0XXX addresses
+    TARGET_ADDR = 0x3000_000C
+    
+    # 4. Execute the Wishbone Write using your existing cocotb driver mechanism
+    # (Adapt the line below to match your specific Wishbone write helper function)
+    await wishbone_write(dut, TARGET_ADDR, wb_payload)
+    
+    # Optional debug logging to match your existing output format
+    # dut._log.debug(f"Programmed Axon {row_idx}, Neuron {neuron_idx} | "
+    #                f"Weight: {weight_val} -> Payload: {hex(wb_payload)}")
+
+
+
 
 # NVM Write: Performs a Wishbone write with an additional delay for Non-Volatile Memory (NVM) programming.
 async def nvm_write(dut, address, data):
@@ -375,8 +418,8 @@ async def program_layer_connections(dut, core_idx, layer_key, flip_sign=False):
         
         # Pack into 32-bit Wishbone word
         # [MODE_PROG(2)][ROW(5)][COL(5)][PAD(4)][WEIGHT(16)]
-        prog_word = (MODE_PROGRAM << 30) | (row << 25) | (col << 20) | (0 << 16) | (w_signed & 0xFFFF)
-        await nvm_write(dut, 0x30000000, prog_word)
+        # Program using the new 1T1R 8-bit mapping logic
+        await program_8bit_weight(dut, row, col, w_signed)
 
     dut._log.info(f"✅ {layer_key} Core {core_idx} programming complete.")
             
@@ -446,6 +489,15 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
                         block_16b = full_stimuli_val & 0xFFFF
 
                     val_slice = encode_l0_block(block_16b)
+
+                    if pic == 0 and core_idx == 0 and row < 3:
+                        dut._log.info(
+                            f"STIM DEBUG | "
+                            f"row={row} "
+                            f"axon={axon} "
+                            f"block16=0x{block_16b:04X} "
+                            f"stim={val_slice}"
+                        )  
                         
                     spike_active = True # We always trigger the read for L0 to inject the block
                 elif layer == 1 and spike_in_matrix is not None:
@@ -476,10 +528,35 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
                     
                     await nvm_read(dut, 0x30000000, data_for_read_op)
 
+                    if layer == 0 and pic == 0 and core_idx == 0 and active_axon_count < 20:
+                        try:
+                            dut._log.info(
+                            f"AXON={axon} "
+                            f"ROW={row} "
+                            f"COL={col} "
+                            f"STIM={val_slice} "
+                            f"WEIGHT={dut.current_weight.value.to_signed()} "
+                            f"CONN={dut.connection.value} "
+                            f"POT={dut.neuron_block_inst.potential[0].value.to_signed()}"
+                            f"SPIKE={int(dut.spike_o.value[0])}"
+                        )
+                        except Exception as e:
+                            dut._log.info(f"DEBUG ERROR: {e}")
+
                 # Control Register Writes (e.g., resetting internal slice/neuron logic after an NVM row sweep)
                 # These addresses (0x3000200x) likely correspond to control registers for neuron slices.
                 # The writes happen after every NVM array row group (e.g., after rows 7, 15, 23, 31)
                 if col == 31:
+
+                    try:
+                        dut._log.info(
+                        f"BEFORE CTRL WRITE "
+                        f"row={row} "
+                        f"POT={dut.neuron_block_inst.potential[0].value.to_signed()}"
+                    )
+                    except:
+                        pass
+
                     if row == 7:
                         await wishbone_write(dut, 0x30002000, 0)
                     elif row == 15:
@@ -489,9 +566,39 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
                     elif row == 31:
                         await wishbone_write(dut, 0x30002006, 0)
 
+                    try:
+                        dut._log.info(
+                            f"AFTER CTRL WRITE "
+                            f"row={row} "
+                            f"POT={dut.neuron_block_inst.potential[0].value.to_signed()}"
+                        )
+                    except:
+                        pass
+        if layer == 0:
+            try:
+                dut._log.info(
+                    f"L0 END PIC | "
+                    f"potential0={dut.neuron_block_inst.potential[0].value.to_signed()}"
+                )
+            except:
+                pass
         # Read the output spikes from the two slices of the core after processing all inputs
         await wishbone_read(dut, 0x30001000, spike_out_matrix, pic, slice_idx=0, layer=layer, core=core_idx)
-        await wishbone_read(dut, 0x30001004, spike_out_matrix, pic, slice_idx=1, layer=layer, core=core_idx) 
+        await wishbone_read(dut, 0x30001004, spike_out_matrix, pic, slice_idx=1, layer=layer, core=core_idx)
+        if layer == 0:
+            pic_spikes = sum(spike_out_matrix[pic])
+
+            dut._log.info(
+                f"L0 DEBUG | Pic={pic} "
+                f"Core={core_idx} "
+                f"SpikeCount={pic_spikes}"
+            )
+
+            if pic_spikes > 0:
+                dut._log.info(
+                    f"L0 DEBUG | First 32 outputs = "
+                    f"{spike_out_matrix[pic][:32]}"
+                ) 
         per_pic_active_axons.append(active_axon_count)
         per_pic_input_signature.append(input_signature)
         if DEBUG_ACTIVE_AXON and layer in (1, 2):
@@ -510,7 +617,58 @@ async def run_layer_for_all_pics(dut, core_idx, layer, num_cores, spike_in_matri
             f"unique_signatures={unique_sig}/{len(per_pic_input_signature)}"
         )
 
+
+
+def generate_software_baseline(stimuli, layer_key, num_pics, num_neurons=64):
+    """
+    Software Digital Twin: Simulates the 1T1R array perfectly in Python
+    to generate expected spikes to compare against the Caravel hardware.
+    """
+    print(f"\n[Digital Twin] Generating Python baseline for {layer_key}...")
+    
+    # 1. Load the exact same weights that were programmed into hardware
+    script_dir = Path(__file__).resolve().parent
+    pos_file = script_dir / f"sentry_{layer_key}_pos.hex"
+    neg_file = script_dir / f"sentry_{layer_key}_neg.hex"
+    
+    with open(pos_file, "r") as fp, open(neg_file, "r") as fn:
+        pos_raw = [int(line.strip(), 16) for line in fp if line.strip()]
+        neg_raw = [int(line.strip(), 16) for line in fn if line.strip()]
+        
+    int8_weights = [p - n for p, n in zip(pos_raw, neg_raw)]
+    
+    software_v_mem = [0] * num_neurons 
+    expected_out_matrix = [[0 for _ in range(num_neurons)] for _ in range(num_pics)]
+
+    # 2. Frame-by-frame simulation
+    for pic in range(num_pics):
+        frame_stimuli = stimuli[pic]
+        
+        # Convert the 32x32 frame into a flat list of 1024 binary spikes
+        current_spikes = []
+        for row in frame_stimuli:
+            for bit_idx in range(32):
+                current_spikes.append(1 if (row >> bit_idx) & 0x1 else 0)
+
+        for neuron_idx in range(num_neurons):
+            # Extract the 1024 weights connected to this specific neuron
+            neuron_weights = int8_weights[neuron_idx::num_neurons]
+            
+            # Use the functions from rram_neuron_model.py
+            syn_sum = calculate_1t1r_syn_sum(current_spikes, neuron_weights)
+            next_v_mem, spike = calculate_1t1r_discrete_step(software_v_mem[neuron_idx], syn_sum)
+            
+            software_v_mem[neuron_idx] = next_v_mem
+            expected_out_matrix[pic][neuron_idx] = spike
+
+    return expected_out_matrix
+
+
+
 # --- Cocotb Test ---
+
+
+
 
 @cocotb.test()
 async def neuron_network_test(dut): 
@@ -559,7 +717,11 @@ async def neuron_network_test(dut):
     # De-assert reset after a short delay
     await Timer(PERIOD * 1, unit="ns")
     dut.wb_rst_i.value = 0
-    
+    dut._log.info("========== TOP ==========")
+    dut._log.info(dir(dut))
+
+    dut._log.info("========== NEURON BLOCK ==========")
+    dut._log.info(dir(dut.neuron_block_inst))
     # --- Layer 0 Simulation ---
     # Layer 0 uses the first trained weight set (L1) in hardware ordering.
     print("\n########################## START LAYER 0 ########################")
@@ -573,7 +735,11 @@ async def neuron_network_test(dut):
         await run_layer_for_all_pics(dut, core_layer_0, layer, NUM_CORES_LAYER_0, None, spike_out_layer_0, run_pics, stimuli=stimuli)
 
     print("\n########################## FINISH LAYER 0 ########################")
-    print(f"L0 output: {spike_out_layer_0}")
+    for i in range(min(5, run_pics)):
+        print(
+            f"L0 Frame {i}: "
+            f"spikes={sum(spike_out_layer_0[i])}"
+        )
     summarize_layer_activity("L0", spike_out_layer_0)
     await Timer(PERIOD * 1, unit="ns")
 
@@ -613,7 +779,22 @@ async def neuron_network_test(dut):
     await Timer(PERIOD * 1, unit="ns")
 
     # --- Final Results Calculation ---
-    correct_pic = 0
+    c# --- Software vs Hardware Validation ---
+    print("\n################# DIGITAL TWIN VALIDATION #################")
+    # Generate the baseline for Layer 2 using the L3 weights
+    expected_layer_2 = generate_software_baseline(stimuli, "L3", run_pics, NUM_CORES_LAYER_2 * NUM_NEURON)
+    
+    mismatches = 0
+    for pic in range(run_pics):
+        if expected_layer_2[pic] != spike_out_layer_2[pic]:
+            mismatches += 1
+            dut._log.error(f"MISMATCH at Frame {pic}! \nExpected: {expected_layer_2[pic]} \nHardware: {spike_out_layer_2[pic]}")
+            
+    if mismatches == 0:
+        dut._log.info("✅ SUCCESS: Python 1T1R Baseline perfectly matches Silicon!")
+        
+    # --- Final Results Calculation --- 
+    correct_pic = 0 
     predict_class = calculate_majority_class(spike_out_layer_2)
     if predict_class and predict_class[0] >= 0:
         print(f"\nPrediction: Gesture Class {predict_class[0]}")
@@ -624,9 +805,9 @@ async def neuron_network_test(dut):
 
 @cocotb.test()
 async def tier1_smoke_handshake(dut):
-    """Sentry-AI Tier 1: 8-bit Weight + LIF Accumulation + Reset"""
+    """Sentry-AI Tier 1: 8-bit Weight + LIF Accumulation + Reset (1T1R Updated)"""
     
-    # 1. Start Clock & Reset (Using your existing logic)
+    # 1. Start Clock & Reset
     clock = Clock(dut.wb_clk_i, 10, unit="ns")
     cocotb.start_soon(clock.start())
     dut.wb_rst_i.value = 1
@@ -634,39 +815,43 @@ async def tier1_smoke_handshake(dut):
     dut.wb_rst_i.value = 0
     await RisingEdge(dut.wb_clk_i)
 
-    # 2. Program a Golden Weight (0x7F = +127) at Row 0, Col 0
-    # packed: [MODE_PROG(2)][ROW(5)][COL(5)][PAD(4)][WEIGHT(16)]
-    prog_word = (MODE_PROGRAM << 30) | (0 << 25) | (0 << 20) | (0 << 16) | 0x7F
-    await nvm_write(dut, 0x30000000, prog_word)
-    dut._log.info("Handshake: Golden Weight +127 programmed.")
+    # 2. Program a Golden Weight (+16) at Row 0, Col 0
+    # +16 is used so it does not instantly breach the THRESHOLD of 24
+    await program_8bit_weight(dut, 0, 0, 16)
+    dut._log.info("Handshake: Golden Weight +16 programmed.")
 
-    # 3. Trigger 1st Spike
-    # read_op: [MODE_READ(2)][ROW(5)][COL(5)][PAD(4)][SPIKE_MASK(16)]
-    read_word = (MODE_READ << 30) | (0 << 25) | (0 << 20) | (0 << 16) | 0x0001
-    await nvm_read(dut, 0x30000000, read_word)
+    # 3. Trigger 1st Spike via Caravel Logic Analyzer Pins
+    # la_data_in[0] routes to array_inst_0 spike_i[0]
+    dut.la_data_in.value = 0x00000000000000000000000000000001
+    await ClockCycles(dut.wb_clk_i, 1)
+    dut.la_data_in.value = 0 # Turn off spike
+    await ClockCycles(dut.wb_clk_i, 1) # Wait for MAC pipeline
 
-    # nvm_read now returns after data-valid handshake + one latch edge.
-    v_mem = dut.neuron_block_inst.potential[0].value.to_signed()
+    # Retrieve V_mem directly from the 1T1R array observation port
+    v_mem = dut.neuron_core_inst.array_inst_0.gen_neuron[0].u_neuron.membrane_o.value.signed_integer
     dut._log.info(f"Handshake: Spike 1 injected. V_mem = {v_mem}")
-    assert v_mem == 127, f"Weight Inflation Error! Expected 127, got {v_mem}"
+    assert v_mem == 16, f"Weight Error! Expected 16, got {v_mem}"
 
     # 4. Wait for Leakage (LIF check)
-    await ClockCycles(dut.wb_clk_i, 4)
-    v_mem_leak = dut.neuron_block_inst.potential[0].value.to_signed()
-    dut._log.info(f"Handshake: Leakage check after 4 cycles. V_mem = {v_mem_leak}")
-    assert v_mem_leak < 127, "LIF Physics Error: Neuron is not leaking!"
+    # 1 cycle leak: 16 >> 2 = 4. V_mem should be 16 - 4 = 12.
+    await ClockCycles(dut.wb_clk_i, 1)
+    v_mem_leak = dut.neuron_core_inst.array_inst_0.gen_neuron[0].u_neuron.membrane_o.value.signed_integer
+    dut._log.info(f"Handshake: Leakage check after 1 cycle. V_mem = {v_mem_leak}")
+    assert v_mem_leak == 12, f"LIF Physics Error: Expected 12, got {v_mem_leak}!"
 
-    # 5. Trigger 2nd Spike to hit Threshold (Reset check)
-    # Since THRESHOLD = 127, Spike 1 (127) + Spike 2 (127) - Leak will fire
-    await nvm_read(dut, 0x30000000, read_word)
-    await RisingEdge(dut.wb_clk_i) # Wait for firing logic
+    # 5. Trigger 2nd Spike to hit Threshold (24)
+    # V_mem is 12. Leak next cycle = 12 >> 2 = 3. Pre-spike V_mem = 9.
+    # Spike +16 -> V_mem = 25. Since 25 >= 24, it fires and resets to 0.
+    dut.la_data_in.value = 0x00000000000000000000000000000001
+    await ClockCycles(dut.wb_clk_i, 1)
+    dut.la_data_in.value = 0
+    await ClockCycles(dut.wb_clk_i, 1)
 
-    final_v_mem = dut.neuron_block_inst.potential[0].value.to_signed()
+    final_v_mem = dut.neuron_core_inst.array_inst_0.gen_neuron[0].u_neuron.membrane_o.value.signed_integer
     dut._log.info(f"Handshake: Threshold breached. V_mem after reset = {final_v_mem}")
     assert final_v_mem == 0, f"Saturation Error: Neuron failed to reset after spike! V_mem={final_v_mem}"
 
     dut._log.info("✅ TIER 1 SMOKE TEST PASSED: Silicon Handshake Successful.")
-
 
 @cocotb.test()
 async def tier2_binary_parity(dut):
@@ -697,13 +882,9 @@ async def tier2_binary_parity(dut):
         await ClockCycles(dut.wb_clk_i, 5)
         dut.wb_rst_i.value = 0
         await RisingEdge(dut.wb_clk_i)
-        tier2_threshold_env = os.environ.get("TB_TIER2_THRESHOLD")
-        if tier2_threshold_env is not None:
-            tier2_threshold = int(tier2_threshold_env)
-        else:
-            tier2_threshold = min(30, max(4, stim_mag * 2))
-        dut.neuron_block_inst.THRESHOLD.value = tier2_threshold
-        dut._log.info(f"Tier2 threshold set to {tier2_threshold}")
+        # Lock Python tracking to the parameterized Verilog threshold
+        tier2_threshold = 24
+        dut._log.info(f"Tier2 threshold locked to 1T1R hardware parameter: {tier2_threshold}")
 
         # 3. Program first 4 cores for 1024-axon coverage with selected polarity.
         for c_id in range(4):
@@ -800,11 +981,11 @@ async def tier2_binary_parity(dut):
                             )
                             dumped_weights.append(raw_w)
 
-                        v_mem = dut.neuron_block_inst.potential[0].value.to_signed()
+                        v_mem = dut.array_inst_0.gen_neuron[0].u_neuron.membrane_o.value.signed_integer
                         if abs(v_mem) > abs(max_v_seen):
                             max_v_seen = v_mem
 
-                        out_bits = dut.spike_o.value.to_unsigned()
+                        out_bits = dut.array_inst_0.spike_o.value.to_unsigned()
                         if out_bits > 0:
                             mode_spikes += bin(out_bits).count("1")
 
@@ -823,3 +1004,4 @@ async def tier2_binary_parity(dut):
         "FATAL: Zero spikes detected in both polarities. "
         "Check weight mapping logic."
     )
+    

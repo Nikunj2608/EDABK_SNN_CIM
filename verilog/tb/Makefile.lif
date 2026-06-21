@@ -1,33 +1,23 @@
-<<<<<<< Updated upstream
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
-# 1. Include ALL source files needed for the Core
-# Using a wildcard is the safest way to ensure the decoder and matrix are included
-VERILOG_SOURCES += $(PWD)/hdl/*.v
-VERILOG_SOURCES += $(PWD)/../rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v
+# Resolve the repo root even when running make from verilog/tb
+PROJECT_ROOT ?= $(abspath ../..)
 
-# 2. Set the TOPLEVEL to the wrapper, NOT the internal block
-TOPLEVEL = nvm_neuron_core_256x64
+# 1. Update VERILOG_SOURCES to point to the new Caravel wrapper, the 64x64 core, and the 1T1R arrays
+VERILOG_SOURCES = $(PROJECT_ROOT)/verilog/rtl/defines.v \
+                  $(PROJECT_ROOT)/verilog/rtl/user_project_wrapper.v \
+                  $(PROJECT_ROOT)/verilog/rtl/neuron_core/hdl/nvm_neuron_core_64x64.v \
+                  $(PROJECT_ROOT)/verilog/tb/hdl/nvm_core_decoder.v \
+                  $(PROJECT_ROOT)/verilog/tb/hdl/nvm_neuron_block.v \
+                  $(PROJECT_ROOT)/verilog/tb/hdl/nvm_neuron_spike_out.v \
+                  $(PROJECT_ROOT)/verilog/rtl/neuron_core/hdl/reram_1t1r_snn_array_32x32.v \
+                  $(PROJECT_ROOT)/verilog/rtl/neuron_core/hdl/reram_1t1r_snn_neuron.v
 
-# 3. Point to our smoke test module
+# 2. Set the TOPLEVEL to the wrapper updated in Step 1
+TOPLEVEL = user_project_wrapper
+
+# 3. Point to your Python test script execution module
 MODULE = neuron_network_test
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
-=======
-SIM ?= icarus
-TOPLEVEL_LANG ?= verilog
-
-# 1. Include ALL source files needed for the Core
-# Using a wildcard is the safest way to ensure the decoder and matrix are included
-VERILOG_SOURCES += $(PWD)/hdl/*.v
-VERILOG_SOURCES += $(PWD)/../rtl/neuron_core/hdl/Neuromorphic_X2_Beh.v
-
-# 2. Set the TOPLEVEL to the wrapper, NOT the internal block
-TOPLEVEL = nvm_neuron_core_256x64
-
-# 3. Point to our smoke test module
-MODULE = neuron_network_test
-
-include $(shell cocotb-config --makefiles)/Makefile.sim
->>>>>>> Stashed changes
